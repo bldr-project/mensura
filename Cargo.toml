@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["mensura", "mensura-macros"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"  # let-chains
+repository = "https://github.com/bldr-project/mensura"
+
+[workspace.dependencies]
+mensura-macros = { path = "mensura-macros", version = "0.1.0" }
+
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+tinyvec = "1.12"
+tokio = { version = "1", default-features = false }
+async-trait = "0.1"
+thiserror = "2"
+reqwest = { version = "0.12", default-features = false }
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+# Instrumentation is meant to disappear into the surrounding code.
+lto = "thin"

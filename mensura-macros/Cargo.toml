@@ -1,0 +1,20 @@
+[package]
+name = "mensura-macros"
+description = "Procedural macros for the `mensura` metrics instrumentation library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/mensura-macros"
+keywords = ["metrics", "influxdb", "instrumentation", "macros"]
+categories = ["development-tools::profiling", "development-tools::debugging"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true

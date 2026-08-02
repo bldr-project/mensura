@@ -1,0 +1,50 @@
+[package]
+name = "mensura"
+description = "Metrics instrumentation with InfluxDB semantics: tags, fields, and macros that never block"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/mensura"
+keywords = ["metrics", "influxdb", "instrumentation", "telemetry", "monitoring"]
+categories = [
+    "development-tools::profiling",
+    "development-tools::debugging",
+    "api-bindings",
+]
+
+[features]
+default = ["influxdb"]
+# Pulls in `reqwest` for the InfluxDB line-protocol backend.
+influxdb = ["dep:reqwest", "tokio/net"]
+
+[dependencies]
+mensura-macros.workspace = true
+tinyvec.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+reqwest = { workspace = true, optional = true, features = [
+    "rustls-tls",
+    "charset",
+    "http2",
+] }
+
+[dev-dependencies]
+clap.workspace = true
+tokio = { workspace = true, features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+    "macros",
+] }
+
+[[example]]
+name = "influx_report"
+required-features = ["influxdb"]
+
+[package.metadata.docs.rs]
+all-features = true
