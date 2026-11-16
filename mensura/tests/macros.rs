@@ -125,7 +125,7 @@ fn values_may_be_arbitrary_expressions() {
 fn keys_may_be_keywords_or_string_literals() {
     let metrics = mensura::test_backend();
 
-    measure!("keys", r#type = "raw", fn = "keyword", "dotted.key" = "quoted", ?count = 1);
+    measure!("keys", r#type = "raw", fn = "keyword", "dotted.key" = "quoted", ?n = 1);
 
     let points = metrics.points();
     let point = only(&points);
