@@ -335,7 +335,7 @@ impl Query {
 
     /// Linearly interpolated percentile of `field`.
     ///
-    /// `percentile` is given in `0..=100`, so `p("time", 99.0)` is the p99.
+    /// `percentile` is given in `0..=100`, so `p("duration", 99.0)` is the p99.
     /// Returns `None` if nothing numeric matched.
     pub fn p(&self, field: &str, percentile: f64) -> Option<f64> {
         let mut values = self.numeric_values(field);

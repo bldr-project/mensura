@@ -337,6 +337,39 @@ fn concurrent_producers_all_get_through() {
     );
 }
 
+#[test]
+fn a_writer_that_finishes_while_the_dispatcher_waits_does_not_wedge_the_queue() {
+    // One-point batches and one writer under a steady flood: the dispatcher
+    // keeps handing batches over while the writer keeps finishing them, so the
+    // writer regularly reports a finished batch at the moment the dispatcher is
+    // waiting to hand over the next one. Neither may wait on the other; if
+    // they did, the flush below would never be acknowledged and every later
+    // point would be dropped.
+    let recorder = Recorder::default();
+    let _registered = Registered::new(
+        recorder.clone(),
+        fast()
+            .with_batch_size(1)
+            .with_writers(1)
+            .with_queue_capacity(64),
+    );
+
+    let producer = std::thread::spawn(|| {
+        for n in 0..20_000u32 {
+            measure!("flood", ?n);
+        }
+    });
+    producer.join().unwrap();
+
+    assert!(
+        mensura::flush_with_timeout(Duration::from_secs(30)),
+        "the queue stopped draining"
+    );
+    let stats = mensura::stats().expect("registered");
+    assert_eq!(recorder.points().len() as u64, stats.sent);
+    assert!(stats.sent > 0);
+}
+
 // The serialization lock is deliberately held across awaits: it is guarding
 // process-wide registration for the whole test, not a short critical section.
 #[allow(clippy::await_holding_lock)]

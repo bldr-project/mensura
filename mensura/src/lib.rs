@@ -24,7 +24,7 @@
 //! // `count!` implies `count = 1`.
 //! count!("http_request", route = "/search", status = 200);
 //!
-//! // `timer!` records `time = <elapsed>` when the binding is dropped.
+//! // `timer!` records `duration = <elapsed>` when the binding is dropped.
 //! {
 //!     let _timer = timer!("query_duration", operation = "query");
 //! }
@@ -114,7 +114,7 @@ pub mod value;
 
 pub use mensura_macros::{count, measure, timer};
 
-pub use backend::{Backend, BackendError, MultiError};
+pub use backend::{Backend, BackendError, MultiError, PartialWrite};
 pub use datapoint::{DataPoint, MAX_VALUES, ValueVec};
 pub use queue::{
     AlreadyRegistered, Config, QueueHandle, Stats, deregister_global_backend,

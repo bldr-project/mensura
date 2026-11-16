@@ -19,7 +19,7 @@ measure!("call_latency", host, region, ?ms);
 // `count!` implies `count = 1`.
 count!("http_request", route = "/search", status = 200);
 
-// `timer!` records `time = <elapsed>` when the binding is dropped.
+// `timer!` records `duration = <elapsed>` when the binding is dropped.
 let _timer = timer!("query_duration", operation = "select");
 ```
 
@@ -127,7 +127,7 @@ impl mensura::Backend for MyBackend {
 
 The InfluxDB backend records a measurement for each request it makes:
 `mensura.influxdb.v2.write`, tagged `outcome` (`success`/`failure`) with fields
-`points`, `time` and `retries`. It is emitted only for batches that carried
+`points`, `duration` and `retries`. It is emitted only for batches that carried
 application data — a batch of nothing but mensura's own reports produces none,
 which is what stops the reporting from feeding itself. Turn it off with
 `with_self_metrics(false)`.
@@ -173,7 +173,7 @@ let backend = Composite::new().with(influx).with(echo);
 ```rust
 measure!("temperature", room = "kitchen", ?celsius = 21.5);
 count!("http_request", route = "/search");     // adds `count = 1`
-let t = timer!("query_duration", op = "select");  // adds `time = <elapsed>` on drop
+let t = timer!("query_duration", op = "select");  // adds `duration = <elapsed>` on drop
 ```
 
 * **The measurement name comes first**, in every one of the three macros. It is
@@ -221,7 +221,7 @@ early, or thrown away:
 
 ```rust
 let mut timer = timer!("load_duration", operation = "load");
-timer.field("rows", rows.len());   // recorded alongside `time`
+timer.field("rows", rows.len());   // recorded alongside `duration`
 timer.tag("outcome", "ok");
 // timer.stop();     -> reports now, returns the elapsed Duration
 // timer.discard();  -> records nothing

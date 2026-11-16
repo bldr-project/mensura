@@ -7,12 +7,12 @@ use crate::queue::GlobalQueue;
 use crate::value::{MeasurementField, MeasurementTag, Value, ValueType};
 
 /// Name of the field a [`Timer`] adds when it reports.
-pub const TIMER_FIELD: &str = "time";
+pub const TIMER_FIELD: &str = "duration";
 
 /// Measures the time between its construction and its drop.
 ///
 /// Created by [`timer!`](crate::timer); on drop it records the tags and fields
-/// captured at construction plus a `time` field holding the elapsed duration.
+/// captured at construction plus a `duration` field holding the elapsed time.
 ///
 /// ```
 /// # use mensura::timer;

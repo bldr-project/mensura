@@ -40,7 +40,52 @@ impl BackendError {
         }
         BackendError::Write(message)
     }
+
+    /// Builds the error of a write that stored part of the batch and lost
+    /// `lost` points, so the queue reports those rather than the whole batch.
+    pub fn partial(lost: usize, message: impl fmt::Display) -> Self {
+        BackendError::Other(Box::new(PartialWrite {
+            lost,
+            message: message.to_string(),
+        }))
+    }
+
+    /// How many points of the batch this error lost, when the backend knows;
+    /// `None` means the whole batch.
+    ///
+    /// For a [`BackendError::Multiple`] it is the most any one backend lost,
+    /// and `None` if any of them lost the whole batch.
+    pub fn points_lost(&self) -> Option<usize> {
+        match self {
+            BackendError::Write(_) => None,
+            BackendError::Multiple(multiple) => {
+                multiple.errors.iter().try_fold(0, |most, (_, error)| {
+                    error.points_lost().map(|lost| most.max(lost))
+                })
+            }
+            BackendError::Other(error) => error
+                .downcast_ref::<PartialWrite>()
+                .map(|partial| partial.lost),
+        }
+    }
 }
+
+/// A write that stored part of a batch; see [`BackendError::partial`].
+#[derive(Debug)]
+pub struct PartialWrite {
+    /// How many points of the batch were not stored.
+    pub lost: usize,
+    /// What the backend said about them.
+    pub message: String,
+}
+
+impl fmt::Display for PartialWrite {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PartialWrite {}
 
 /// The collected failures of a composite write.
 #[derive(Debug)]

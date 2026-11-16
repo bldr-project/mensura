@@ -19,7 +19,11 @@ const MAX_VALUES: usize = 16;
 const COUNT_FIELD: &str = "count";
 
 /// The field a `timer!` adds when it reports.
-const TIMER_FIELD: &str = "time";
+const TIMER_FIELD: &str = "duration";
+
+/// Must match `mensura::line_protocol::RESERVED_KEY`: InfluxDB refuses it as a
+/// tag or field key, because it names the point's timestamp.
+const RESERVED_KEY: &str = "time";
 
 /// Records a measurement.
 ///
@@ -88,7 +92,7 @@ pub fn count(input: TokenStream) -> TokenStream {
 }
 
 /// Starts a [`Timer`](https://docs.rs/mensura/latest/mensura/struct.Timer.html)
-/// that records `time = <elapsed>` when it is dropped.
+/// that records `duration = <elapsed>` when it is dropped.
 ///
 /// ```ignore
 /// let _timer = timer!("query_duration", operation = "select");
@@ -357,6 +361,17 @@ fn parse_docstring(attrs: &[Attribute]) -> syn::Result<Option<String>> {
 
 fn check_duplicates(entries: &[Entry]) -> syn::Result<()> {
     for (index, entry) in entries.iter().enumerate() {
+        if entry.key == RESERVED_KEY {
+            return Err(syn::Error::new(
+                entry.key_span,
+                format!(
+                    "`{RESERVED_KEY}` cannot be a {}: InfluxDB reserves it for the point's \
+                     timestamp and refuses the key; name what is measured, as in \
+                     `?duration = elapsed`",
+                    entry.kind.describe()
+                ),
+            ));
+        }
         if let Some(earlier) = entries[..index]
             .iter()
             .find(|other| other.kind == entry.kind && other.key == entry.key)
@@ -410,6 +425,20 @@ fn build(mut args: Args, shape: Shape) -> syn::Result<TokenStream2> {
             "a measurement needs at least one field, written with a `?` prefix as in \
              `?latency = elapsed`; tags alone cannot be recorded — use `count!` to record \
              `count = 1` against these tags",
+        ));
+    }
+
+    // The timer writes its own `duration` when it reports; a second one would
+    // be a duplicate field the user never sees.
+    if matches!(shape, Shape::Timer)
+        && let Some(entry) = args
+            .entries
+            .iter()
+            .find(|entry| entry.kind == Kind::Field && entry.key == TIMER_FIELD)
+    {
+        return Err(syn::Error::new(
+            entry.key_span,
+            format!("`timer!` records `{TIMER_FIELD}` itself when it reports"),
         ));
     }
 
@@ -470,4 +499,44 @@ fn build(mut args: Args, shape: Shape) -> syn::Result<TokenStream2> {
             }
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The compile error an invocation produces, or `None` if it expands.
+    fn rejection(input: &str, shape: Shape) -> Option<String> {
+        let args = match syn::parse_str::<Args>(input) {
+            Ok(args) => args,
+            Err(error) => return Some(error.to_string()),
+        };
+        build(args, shape).err().map(|error| error.to_string())
+    }
+
+    #[test]
+    fn time_is_refused_as_a_field_or_a_tag() {
+        for shape in [Shape::Measure, Shape::Count, Shape::Timer] {
+            let error = rejection(r#""dns_lookup", ?time = elapsed"#, shape)
+                .expect("a field named `time` must not compile");
+            assert!(error.contains("`time` cannot be a field"), "got {error}");
+
+            let error = rejection(r#""dns_lookup", time = "noon", ?n = 1"#, shape)
+                .expect("a tag named `time` must not compile");
+            assert!(error.contains("`time` cannot be a tag"), "got {error}");
+        }
+    }
+
+    #[test]
+    fn a_timer_records_its_own_duration() {
+        let error = rejection(r#""dns_lookup", ?duration = elapsed"#, Shape::Timer)
+            .expect("a timer's own field must not be written by hand");
+        assert!(error.contains("records `duration` itself"), "got {error}");
+
+        assert_eq!(
+            rejection(r#""dns_lookup", ?duration = elapsed"#, Shape::Measure),
+            None
+        );
+        assert_eq!(rejection(r#""dns_lookup", host = "a""#, Shape::Timer), None);
+    }
 }

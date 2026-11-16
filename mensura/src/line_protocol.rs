@@ -76,6 +76,12 @@ impl Options {
     }
 }
 
+/// The one key InfluxDB refuses as a tag or field key: it names the point's
+/// timestamp. A field keyed `time` is dropped on ingest, and a point left with
+/// no other field fails with `422 Unprocessable Entity`, so the encoder leaves
+/// such keys out rather than send them.
+pub const RESERVED_KEY: &str = "time";
+
 fn set(entries: &mut Vec<(String, Value)>, key: String, value: Value) {
     match entries.iter_mut().find(|(name, _)| *name == key) {
         Some(entry) => entry.1 = value,
@@ -87,7 +93,8 @@ fn set(entries: &mut Vec<(String, Value)>, key: String, value: Value) {
 ///
 /// A point with no name, or with no field that has a line-protocol spelling, is
 /// skipped and leaves `out` untouched: InfluxDB rejects such points, and one
-/// malformed line fails the whole batch.
+/// malformed line fails the whole batch. A tag or field keyed [`RESERVED_KEY`]
+/// is left out of the line, so a point whose only field is `time` is skipped.
 pub fn write_point(out: &mut String, point: &DataPoint, options: &Options) -> bool {
     // An unnamed series cannot be stored; the macros make this unreachable.
     if point.measurement.is_empty() {
@@ -139,6 +146,9 @@ pub fn write_batch(points: &[DataPoint], options: &Options) -> (String, usize) {
 }
 
 fn write_tag(out: &mut String, key: &str, value: &Value) {
+    if key == RESERVED_KEY {
+        return;
+    }
     // Tags are usually strings already, so borrow rather than render.
     let rendered = match value.as_str() {
         Some(text) => Cow::Borrowed(text),
@@ -156,8 +166,12 @@ fn write_tag(out: &mut String, key: &str, value: &Value) {
 }
 
 /// Writes `key=value`, prefixed by a space if it opens the field set and a
-/// comma otherwise. Returns `false` if the value has no line-protocol spelling.
+/// comma otherwise. Returns `false` if the key is [`RESERVED_KEY`] or the value
+/// has no line-protocol spelling.
 fn write_field(out: &mut String, key: &str, value: &Value, first: bool) -> bool {
+    if key == RESERVED_KEY {
+        return false;
+    }
     let mut rendered = String::new();
     if !write_field_value(&mut rendered, value) {
         return false;
@@ -280,8 +294,30 @@ mod tests {
     fn unsigned_and_duration_fields() {
         let p = point()
             .with_field("bytes", 7u64)
-            .with_field("time", Duration::from_micros(3));
-        assert_eq!(line(&p), "mensura bytes=7u,time=3000i");
+            .with_field("duration", Duration::from_micros(3));
+        assert_eq!(line(&p), "mensura bytes=7u,duration=3000i");
+    }
+
+    #[test]
+    fn a_time_key_is_left_out() {
+        let p = point()
+            .with_tag("time", "noon")
+            .with_field("time", Duration::from_micros(3))
+            .with_field("bytes", 7u64);
+        assert_eq!(line(&p), "mensura bytes=7u");
+    }
+
+    #[test]
+    fn a_point_whose_only_field_is_time_is_skipped() {
+        let mut out = String::new();
+        let p = DataPoint::new("dns_lookup").with_field("time", Duration::from_micros(3));
+        assert!(!write_point(&mut out, &p, &Options::new()));
+        assert!(out.is_empty());
+
+        let options = Options::new().with_global_field("time", 1i64);
+        let p = DataPoint::new("dns_lookup").with_field("n", 1i64);
+        assert!(write_point(&mut out, &p, &options));
+        assert_eq!(out.rsplit_once(' ').unwrap().0, "dns_lookup n=1i");
     }
 
     #[test]
