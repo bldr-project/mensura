@@ -84,7 +84,10 @@ pub fn measure(input: TokenStream) -> TokenStream {
 ///
 /// Takes the same arguments as [`measure!`] — a measurement name first,
 /// then tags and fields — but needs no field of its own. An explicit
-/// `?count = …` overrides the implied one.
+/// `?count = …` of any integer type overrides the implied one and is written
+/// as an `i64`, as the implied one is: InfluxDB refuses a field of a second
+/// type on one measurement. `count` is `count!`'s alone; `measure!` and
+/// `timer!` refuse it.
 #[proc_macro]
 pub fn count(input: TokenStream) -> TokenStream {
     let args = syn::parse_macro_input!(input as Args);
@@ -404,7 +407,18 @@ fn build(mut args: Args, shape: Shape) -> syn::Result<TokenStream2> {
             .entries
             .iter()
             .any(|entry| entry.kind == Kind::Field && entry.key == COUNT_FIELD);
-        if !has_count {
+        if has_count {
+            // Written as `i64` whatever integer it is, the type of the implied
+            // `count = 1`, so one measurement never holds two types of `count`.
+            for entry in &mut args.entries {
+                if entry.kind == Kind::Field && entry.key == COUNT_FIELD {
+                    let value = &entry.value;
+                    entry.value = syn::parse_quote_spanned!(value.span()=>
+                        ::mensura::internal::count_value(#value)
+                    );
+                }
+            }
+        } else {
             args.entries.push(Entry {
                 kind: Kind::Field,
                 key: COUNT_FIELD.to_string(),
@@ -425,6 +439,23 @@ fn build(mut args: Args, shape: Shape) -> syn::Result<TokenStream2> {
             "a measurement needs at least one field, written with a `?` prefix as in \
              `?latency = elapsed`; tags alone cannot be recorded — use `count!` to record \
              `count = 1` against these tags",
+        ));
+    }
+
+    // `count` is `count!`'s, written as an integer; a `count` of another
+    // type on the same measurement is refused by InfluxDB.
+    if !matches!(shape, Shape::Count)
+        && let Some(entry) = args
+            .entries
+            .iter()
+            .find(|entry| entry.kind == Kind::Field && entry.key == COUNT_FIELD)
+    {
+        return Err(syn::Error::new(
+            entry.key_span,
+            format!(
+                "a `{COUNT_FIELD}` field is recorded with `count!`, which writes it as an \
+                 integer of one type for every point of the measurement"
+            ),
         ));
     }
 
@@ -525,6 +556,26 @@ mod tests {
                 .expect("a tag named `time` must not compile");
             assert!(error.contains("`time` cannot be a tag"), "got {error}");
         }
+    }
+
+    #[test]
+    fn count_is_counts_alone() {
+        for shape in [Shape::Measure, Shape::Timer] {
+            let error = rejection(r#""store_get", ?count = 1u64, ?bytes = n"#, shape)
+                .expect("a `count` field outside `count!` must not compile");
+            assert!(error.contains("recorded with `count!`"), "got {error}");
+        }
+        assert_eq!(
+            rejection(r#""store_get", ?count = 1u64, ?bytes = n"#, Shape::Count),
+            None
+        );
+    }
+
+    #[test]
+    fn an_explicit_count_is_converted() {
+        let args = syn::parse_str::<Args>(r#""store_get", ?count = n"#).unwrap();
+        let expansion = build(args, Shape::Count).unwrap().to_string();
+        assert!(expansion.contains("count_value"), "got {expansion}");
     }
 
     #[test]

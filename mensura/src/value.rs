@@ -412,3 +412,50 @@ mod tests {
         assert_eq!(Value::F64(1.5), Value::F64(1.5));
     }
 }
+
+/// An integer `count!` records as its `count` field.
+///
+/// `count` is always written as a signed integer, the type of the implied
+/// `count = 1`: InfluxDB refuses a field whose type differs from the one it
+/// already holds for that measurement, so a `count` of a second type would be
+/// refused point by point.
+#[doc(hidden)]
+pub trait CountValue {
+    /// The count as `i64`, saturating at `i64::MAX`.
+    fn into_count(self) -> i64;
+}
+
+macro_rules! count_value_signed {
+    ($($t:ty),*) => {$(
+        impl CountValue for $t {
+            fn into_count(self) -> i64 {
+                i64::from(self)
+            }
+        }
+    )*};
+}
+
+macro_rules! count_value_unsigned {
+    ($($t:ty),*) => {$(
+        impl CountValue for $t {
+            fn into_count(self) -> i64 {
+                i64::try_from(self).unwrap_or(i64::MAX)
+            }
+        }
+    )*};
+}
+
+count_value_signed!(i8, i16, i32, i64);
+count_value_unsigned!(u8, u16, u32, u64, usize);
+
+impl CountValue for isize {
+    fn into_count(self) -> i64 {
+        i64::try_from(self).unwrap_or(i64::MAX)
+    }
+}
+
+/// Converts an explicit `?count = …` of `count!`; see [`CountValue`].
+#[doc(hidden)]
+pub fn count_value(value: impl CountValue) -> i64 {
+    value.into_count()
+}

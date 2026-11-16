@@ -125,7 +125,7 @@ fn values_may_be_arbitrary_expressions() {
 fn keys_may_be_keywords_or_string_literals() {
     let metrics = mensura::test_backend();
 
-    measure!("keys", r#type = "raw", fn = "keyword", "dotted.key" = "quoted", ?count = 1);
+    measure!("keys", r#type = "raw", fn = "keyword", "dotted.key" = "quoted", ?n = 1);
 
     let points = metrics.points();
     let point = only(&points);
@@ -168,8 +168,22 @@ fn count_implies_a_count_field() {
 
     count!("hits", route = "/search");
     count!("hits", route = "/search", ?count = 5i64);
+    count!("hits", route = "/search", ?count = 3u64);
+    count!("hits", route = "/search", ?count = u64::MAX);
 
-    assert_eq!(metrics.query().tag("route", "/search").sum("count"), 6.0);
+    assert_eq!(
+        metrics.query().tag("route", "/search").sum("count"),
+        9.0 + i64::MAX as f64
+    );
+    assert!(
+        metrics
+            .query()
+            .measurement("hits")
+            .points()
+            .iter()
+            .all(|point| matches!(point.field("count"), Some(Value::I64(_)))),
+        "every `count` is an i64"
+    );
     assert_eq!(
         metrics.query().field("count", 1).count(),
         1,
