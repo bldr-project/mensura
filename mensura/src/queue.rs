@@ -567,7 +567,14 @@ struct Dispatcher {
     /// unbounded work.
     batches: mpsc::Sender<Vec<DataPoint>>,
     /// One message per finished batch, used to know when the writers are idle.
-    finished_batches: mpsc::Receiver<()>,
+    ///
+    /// Unbounded, so that a writer never waits to report: the dispatcher reads
+    /// it only between hand-offs, and a writer parked on a full channel here
+    /// while the dispatcher is parked on a full `batches` would wait on each
+    /// other forever, with every new point dropped. It holds one `()` per
+    /// batch written and not yet reaped; the dispatcher's loop reaps them as
+    /// they land.
+    finished_batches: mpsc::UnboundedReceiver<()>,
     /// Batches handed out and not yet reported finished.
     in_flight: usize,
     /// Value of [`Counters::dropped`] the last time it was reported, so that a
@@ -583,7 +590,7 @@ impl Dispatcher {
         counters: Arc<Counters>,
     ) -> (Self, WriterPool) {
         let (batches, batch_rx) = mpsc::channel(config.writers);
-        let (finished_tx, finished_batches) = mpsc::channel(config.writers.max(1));
+        let (finished_tx, finished_batches) = mpsc::unbounded_channel();
         let pool = WriterPool {
             count: config.writers,
             batches: Arc::new(tokio::sync::Mutex::new(batch_rx)),
@@ -724,7 +731,7 @@ struct WriterPool {
     /// Shared so that a batch goes to whichever writer is free next. The lock
     /// is held only while taking a batch, never while writing one.
     batches: Arc<tokio::sync::Mutex<mpsc::Receiver<Vec<DataPoint>>>>,
-    finished: mpsc::Sender<()>,
+    finished: mpsc::UnboundedSender<()>,
     backend: Arc<dyn Backend>,
     counters: Arc<Counters>,
     log_errors: bool,
@@ -747,13 +754,14 @@ impl WriterPool {
                         None => break,
                     };
                     if let Err(error) = backend.write(&batch).await {
-                        // The batch is dropped either way: a backend that
-                        // rejected it once will reject it again, and holding on
-                        // would stall everything behind it. Say plainly how
-                        // much was lost.
-                        warn(&counters, log_errors, backend.name(), &error, batch.len());
+                        // The batch is not retried: a backend that rejected it
+                        // once will reject it again, and holding on would stall
+                        // everything behind it. Say plainly how much was lost:
+                        // the points the backend names, or else all of them.
+                        let lost = error.points_lost().unwrap_or(batch.len());
+                        warn(&counters, log_errors, backend.name(), &error, lost);
                     }
-                    if finished.send(()).await.is_err() {
+                    if finished.send(()).is_err() {
                         break;
                     }
                 }

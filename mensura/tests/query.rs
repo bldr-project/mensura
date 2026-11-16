@@ -144,9 +144,9 @@ fn a_timer_is_visible_to_the_query_api() {
     }
 
     let query = metrics.query().tag("operation", "load");
-    assert_eq!(query.sample_count("time"), 1);
-    assert!(query.min("time").unwrap() >= 5_000_000.0);
-    assert_eq!(query.p("time", 99.0), query.max("time"));
+    assert_eq!(query.sample_count("duration"), 1);
+    assert!(query.min("duration").unwrap() >= 5_000_000.0);
+    assert_eq!(query.p("duration", 99.0), query.max("duration"));
 }
 
 /// Dropping the handle must restore the previous state, or the next test in

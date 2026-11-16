@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `timer!` records its elapsed time as the field `duration` (`TIMER_FIELD`);
+  it was `time`, a key InfluxDB refuses, so no timer's duration was stored.
+- The macros refuse `time` as a tag or field key at compile time, and `timer!`
+  refuses a hand-written `duration`.
+- The line-protocol encoder leaves out any tag or field keyed `time`
+  (`line_protocol::RESERVED_KEY`); a point left with no field is skipped.
+
+### Fixed
+
+- The dispatcher and a writer could wait on each other forever when the writer
+  finished a batch while the dispatcher was handing over the next one; the
+  queue then filled and every later point was dropped, unreported. A writer
+  now reports finished batches over an unbounded channel.
+- A partial write (`422`, `partial write: … dropped=<n>`) is reported as `<n>`
+  points lost, not the whole batch: InfluxDB stores the rest. Points the
+  encoder skips are reported with their measurement names.
+
+### Added
+
+- `BackendError::partial` and `BackendError::points_lost`, so a backend can say
+  how much of a batch it lost (`PartialWrite`).
+- `.bldr.ts`: the crates' check, clippy and tests as a bldr workspace member.
+
 ## [0.1.0] - 2026-08-02
 
 Initial release.

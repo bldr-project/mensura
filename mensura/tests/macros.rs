@@ -200,7 +200,7 @@ fn a_timer_reports_elapsed_time_on_drop() {
     assert_eq!(point.docstring, Some("Time spent in the block."));
 
     let elapsed = point
-        .field("time")
+        .field("duration")
         .and_then(Value::as_f64)
         .expect("time field");
     assert!(
@@ -242,7 +242,7 @@ fn macros_accept_no_arguments_and_trailing_commas() {
 
     assert_eq!(metrics.query().count(), 4);
     assert_eq!(metrics.query().with_field("count").count(), 1);
-    assert_eq!(metrics.query().with_field("time").count(), 1);
+    assert_eq!(metrics.query().with_field("duration").count(), 1);
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn a_bare_name_records_the_variable_of_that_name() {
         metrics
             .query()
             .tag("region", "us")
-            .with_field("time")
+            .with_field("duration")
             .count(),
         1
     );

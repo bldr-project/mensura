@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Records one round of measurements.
 async fn report(round: u32) {
-    // A timer reports `time = <elapsed>` when it goes out of scope.
+    // A timer reports `duration = <elapsed>` when it goes out of scope.
     let timer = timer!(
         /// Wall-clock duration of one example round.
         "round_duration",

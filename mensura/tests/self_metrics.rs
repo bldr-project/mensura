@@ -40,7 +40,7 @@ async fn a_write_is_reported_as_a_measurement() {
     assert_eq!(report.sum("points"), 2.0, "both points were in the request");
     assert_eq!(report.sum("retries"), 0.0);
     assert_eq!(
-        report.sample_count("time"),
+        report.sample_count("duration"),
         1,
         "the request should be timed even when it fails"
     );

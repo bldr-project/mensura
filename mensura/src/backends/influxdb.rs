@@ -22,7 +22,7 @@ pub const SELF_MEASUREMENT_PREFIX: &str = "mensura.influxdb.v2.";
 /// Measurement recording the outcome of one write request.
 ///
 /// Tagged `outcome` (`success` or `failure`), with fields `points` (how many
-/// measurements the request carried), `time` (how long it took) and `retries`.
+/// measurements the request carried), `duration` (how long it took) and `retries`.
 ///
 /// The report travels through the queue like any other measurement, so the very
 /// last write of a process — the one that drains the queue on shutdown — has
@@ -247,6 +247,30 @@ impl InfluxDb {
         }
     }
 
+    /// The error for `skipped` points the encoder left out of a batch, naming
+    /// their measurements.
+    fn skipped_error(&self, points: &[DataPoint], skipped: usize) -> BackendError {
+        let mut names: Vec<&str> = Vec::new();
+        let mut scratch = String::new();
+        for point in points {
+            if !line_protocol::write_point(&mut scratch, point, &self.options)
+                && !names.contains(&point.measurement)
+            {
+                names.push(point.measurement);
+            }
+            scratch.clear();
+        }
+        BackendError::partial(
+            skipped,
+            format!(
+                "{skipped} point(s) were not written ({}): a point needs a name and at \
+                 least one representable field not named `{}`",
+                names.join(", "),
+                line_protocol::RESERVED_KEY,
+            ),
+        )
+    }
+
     fn client(&self) -> &Client {
         self.client.get_or_init(|| {
             Client::builder()
@@ -307,7 +331,7 @@ impl InfluxDb {
             WRITE_MEASUREMENT,
             outcome,
             ?points,
-            ?time = elapsed,
+            ?duration = elapsed,
             ?retries,
         );
     }
@@ -333,11 +357,30 @@ impl InfluxDb {
             return Ok(());
         }
         let body = response.text().await.unwrap_or_default();
+        let message = format!("influxdb returned {status}: {}", body.trim());
+        let error = match partial_write_dropped(status, &body) {
+            Some(dropped) => BackendError::partial(dropped, message),
+            None => BackendError::Write(message),
+        };
         Err(FailedWrite {
-            error: BackendError::Write(format!("influxdb returned {status}: {}", body.trim())),
+            error,
             worth_retrying: is_retriable(status),
         })
     }
+}
+
+/// The number of points InfluxDB refused from a batch it otherwise stored.
+///
+/// InfluxDB answers a batch with some unwritable points with `422`, a message
+/// starting `partial write:` that names the first refused point, and
+/// `dropped=<n>` at its end; every other point of the batch is stored.
+fn partial_write_dropped(status: StatusCode, body: &str) -> Option<usize> {
+    if status != StatusCode::UNPROCESSABLE_ENTITY || !body.contains("partial write") {
+        return None;
+    }
+    let (_, after) = body.rsplit_once("dropped=")?;
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
 }
 
 /// A write attempt that did not succeed, and whether repeating it might.
@@ -401,30 +444,30 @@ impl Backend for InfluxDb {
         let (payload, skipped) = self.payload(points);
         if payload.is_empty() {
             // Nothing to send, so there is no request to report on either.
-            return skipped_error(skipped);
+            return Err(self.skipped_error(points, skipped));
         }
 
         let started = Instant::now();
         let outcome = self.post(payload).await;
         self.report_write(points, points.len() - skipped, started.elapsed(), &outcome);
 
-        outcome.result?;
-        skipped_error(skipped)
+        match (outcome.result, skipped) {
+            (Ok(()), 0) => Ok(()),
+            (Ok(()), _) => Err(self.skipped_error(points, skipped)),
+            (Err(error), 0) => Err(error),
+            (Err(error), _) => Err(match error.points_lost() {
+                Some(dropped) => BackendError::partial(
+                    dropped + skipped,
+                    format!("{error}; {}", self.skipped_error(points, skipped)),
+                ),
+                // The request failed outright, so the whole batch is lost.
+                None => error,
+            }),
+        }
     }
 
     fn name(&self) -> &'static str {
         "influxdb"
-    }
-}
-
-fn skipped_error(skipped: usize) -> Result<(), BackendError> {
-    if skipped == 0 {
-        Ok(())
-    } else {
-        Err(BackendError::Write(format!(
-            "the batch was written, but {skipped} point(s) were dropped: \
-             a point needs a name and at least one representable field"
-        )))
     }
 }
 
@@ -479,11 +522,36 @@ mod tests {
 
     #[tokio::test]
     async fn a_batch_of_unwritable_points_never_hits_the_network() {
-        // No fields, so nothing to send: this must fail locally rather than
-        // POST an empty body to a URL that does not exist.
-        let points = vec![DataPoint::new("m").with_tag("host", "a")];
-        let error = offline().write(&points).await.unwrap_err().to_string();
-        assert!(error.contains("1 point(s) were dropped"), "got {error}");
+        // No representable fields, so nothing to send: this must fail locally
+        // rather than POST an empty body to a URL that does not exist.
+        let points = vec![
+            DataPoint::new("m").with_tag("host", "a"),
+            DataPoint::new("dns_lookup").with_field("time", Duration::from_millis(1)),
+        ];
+        let error = offline().write(&points).await.unwrap_err();
+        assert_eq!(error.points_lost(), Some(2));
+        let error = error.to_string();
+        assert!(
+            error.contains("2 point(s) were not written (m, dns_lookup)"),
+            "got {error}"
+        );
+    }
+
+    #[test]
+    fn a_partial_write_counts_only_the_dropped_points() {
+        let body = r#"{"code":"unprocessable entity","message":"failure writing points to database: partial write: invalid field name: input field \"time\" on measurement \"dns_lookup\" is invalid dropped=1"}"#;
+        assert_eq!(
+            partial_write_dropped(StatusCode::UNPROCESSABLE_ENTITY, body),
+            Some(1)
+        );
+        assert_eq!(partial_write_dropped(StatusCode::BAD_REQUEST, body), None);
+        assert_eq!(
+            partial_write_dropped(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"code":"unprocessable entity","message":"bucket not found"}"#
+            ),
+            None
+        );
     }
 
     #[tokio::test]
