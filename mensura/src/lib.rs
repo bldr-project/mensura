@@ -136,5 +136,7 @@ pub mod internal {
     pub use crate::datapoint::{DataPoint, Entry, MAX_VALUES, ValueVec};
     pub use crate::queue::{GLOBAL_QUEUE, GlobalQueue, QueueHandle};
     pub use crate::timer::Timer;
-    pub use crate::value::{MeasurementField, MeasurementTag, Value, ValueType};
+    pub use crate::value::{
+        CountValue, MeasurementField, MeasurementTag, Value, ValueType, count_value,
+    };
 }

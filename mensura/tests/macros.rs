@@ -168,8 +168,22 @@ fn count_implies_a_count_field() {
 
     count!("hits", route = "/search");
     count!("hits", route = "/search", ?count = 5i64);
+    count!("hits", route = "/search", ?count = 3u64);
+    count!("hits", route = "/search", ?count = u64::MAX);
 
-    assert_eq!(metrics.query().tag("route", "/search").sum("count"), 6.0);
+    assert_eq!(
+        metrics.query().tag("route", "/search").sum("count"),
+        9.0 + i64::MAX as f64
+    );
+    assert!(
+        metrics
+            .query()
+            .measurement("hits")
+            .points()
+            .iter()
+            .all(|point| matches!(point.field("count"), Some(Value::I64(_)))),
+        "every `count` is an i64"
+    );
     assert_eq!(
         metrics.query().field("count", 1).count(),
         1,

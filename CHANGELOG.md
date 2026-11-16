@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `count` is `count!`'s field alone: `measure!` and `timer!` refuse it, and an
+  explicit `?count = …` of any integer type is written as `i64`, the type of
+  the implied `count = 1`. A `count` written as `u64` beside `count!`'s `i64`
+  on one measurement had InfluxDB refuse one of the two types.
 - `timer!` records its elapsed time as the field `duration` (`TIMER_FIELD`);
   it was `time`, a key InfluxDB refuses, so no timer's duration was stored.
 - The macros refuse `time` as a tag or field key at compile time, and `timer!`
